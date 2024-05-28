@@ -2,17 +2,17 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
 
 	"go.uber.org/fx"
+	"go.uber.org/fx/fxevent"
+	"go.uber.org/zap"
 )
 
 // Function to build the HTTP server
-func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
+func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux, log *zap.Logger) *http.Server {
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -20,7 +20,7 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux) *http.Server {
 			if err != nil {
 				return err
 			}
-			fmt.Println("Starting HTTP server at", srv.Addr)
+			log.Info("Starting HTTP server", zap.String("addr", srv.Addr))
 			go srv.Serve(ln)
 			return nil
 		},
@@ -41,12 +41,17 @@ func NewServeMux(echo *EchoHandler) *http.ServeMux {
 
 func main() {
 	fx.New(
+		// Use zap logger for FXs logs as well
+		fx.WithLogger(func(log *zap.Logger) fxevent.Logger {
+			return &fxevent.ZapLogger{Logger: log}
+		}),
 		// This provides the HTTP Server to the container
 		// so that we may use it
 		fx.Provide(
 			NewHTTPServer,
 			NewServeMux,
 			NewEchoHandler,
+			zap.NewExample, // zap.NewProduction <- for real applications
 		),
 		// Used for root level invocations like background
 		// workers or global loggers. Without this invoke,
@@ -60,16 +65,18 @@ func main() {
 
 // EchoHandler is an http.Handler that copies its request body
 // back to the response.
-type EchoHandler struct{}
+type EchoHandler struct {
+	log *zap.Logger
+}
 
 // NewEchoHandler builds a new EchoHandler.
-func NewEchoHandler() *EchoHandler {
-	return &EchoHandler{}
+func NewEchoHandler(log *zap.Logger) *EchoHandler {
+	return &EchoHandler{log: log}
 }
 
 // ServeHTTP handles an HTTP request to the /echo endpoint.
-func (*EchoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *EchoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, r.Body); err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to handle request:", err)
+		h.log.Warn("Failed to handle request", zap.Error(err))
 	}
 }
