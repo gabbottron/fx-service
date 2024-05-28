@@ -43,12 +43,22 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux, log *zap.Logger) *http.S
 
 // NewServeMux builds a ServeMux that will route requests
 // to the given Routes.
-func NewServeMux(route1, route2 Route) *http.ServeMux {
+func NewServeMux(routes []Route) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.Handle(route1.Pattern(), route1)
-	mux.Handle(route2.Pattern(), route2)
-
+	for _, route := range routes {
+		mux.Handle(route.Pattern(), route)
+	}
 	return mux
+}
+
+// AsRoute annotates the given constructor to state that
+// it provides a route to the "routes" group.
+func AsRoute(f any) any {
+	return fx.Annotate(
+		f,
+		fx.As(new(Route)),
+		fx.ResultTags(`group:"routes"`),
+	)
 }
 
 func main() {
@@ -61,25 +71,15 @@ func main() {
 		// so that we may use it
 		fx.Provide(
 			NewHTTPServer,
-			// annotate NewServeMux to pick these two names values
-			// now that they are annotated
+			// annotate NewServeMux to say that it accepts a slice that contains the contents of the "routes" group
 			fx.Annotate(
 				NewServeMux,
-				fx.ParamTags(`name:"echo"`, `name:"hello"`),
+				fx.ParamTags(`group:"routes"`),
 			),
-			// handler should be provided as a Route
-			fx.Annotate(
-				NewEchoHandler,
-				fx.As(new(Route)),
-				// Fx does not allow two instances of the same type to be present in the container without annotating them
-				fx.ResultTags(`name:"echo"`),
-			),
-			fx.Annotate(
-				NewHelloHandler,
-				fx.As(new(Route)),
-				// Fx does not allow two instances of the same type to be present in the container without annotating them
-				fx.ResultTags(`name:"hello"`),
-			),
+			// handlers should be provided as a Route
+			// this feeds their routes into this group
+			AsRoute(NewEchoHandler),
+			AsRoute(NewHelloHandler),
 			zap.NewExample, // zap.NewProduction <- for real applications
 		),
 		// Used for root level invocations like background
