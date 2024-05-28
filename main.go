@@ -11,6 +11,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// Route is an http.Handler that knows the mux pattern
+// under which it will be registered.
+type Route interface {
+	http.Handler
+
+	// Pattern reports the path at which this is registered.
+	Pattern() string
+}
+
 // Function to build the HTTP server
 func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux, log *zap.Logger) *http.Server {
 	srv := &http.Server{Addr: ":8080", Handler: mux}
@@ -32,10 +41,10 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux, log *zap.Logger) *http.S
 }
 
 // NewServeMux builds a ServeMux that will route requests
-// to the given EchoHandler.
-func NewServeMux(echo *EchoHandler) *http.ServeMux {
+// to the given Route.
+func NewServeMux(route Route) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.Handle("/echo", echo)
+	mux.Handle(route.Pattern(), route)
 	return mux
 }
 
@@ -50,7 +59,11 @@ func main() {
 		fx.Provide(
 			NewHTTPServer,
 			NewServeMux,
-			NewEchoHandler,
+			// handler should be provided as a Route
+			fx.Annotate(
+				NewEchoHandler,
+				fx.As(new(Route)),
+			),
 			zap.NewExample, // zap.NewProduction <- for real applications
 		),
 		// Used for root level invocations like background
@@ -72,6 +85,11 @@ type EchoHandler struct {
 // NewEchoHandler builds a new EchoHandler.
 func NewEchoHandler(log *zap.Logger) *EchoHandler {
 	return &EchoHandler{log: log}
+}
+
+// EchoHandler implements the Route interface
+func (*EchoHandler) Pattern() string {
+	return "/echo"
 }
 
 // ServeHTTP handles an HTTP request to the /echo endpoint.
