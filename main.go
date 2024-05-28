@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -41,10 +42,12 @@ func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux, log *zap.Logger) *http.S
 }
 
 // NewServeMux builds a ServeMux that will route requests
-// to the given Route.
-func NewServeMux(route Route) *http.ServeMux {
+// to the given Routes.
+func NewServeMux(route1, route2 Route) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.Handle(route.Pattern(), route)
+	mux.Handle(route1.Pattern(), route1)
+	mux.Handle(route2.Pattern(), route2)
+
 	return mux
 }
 
@@ -58,11 +61,24 @@ func main() {
 		// so that we may use it
 		fx.Provide(
 			NewHTTPServer,
-			NewServeMux,
+			// annotate NewServeMux to pick these two names values
+			// now that they are annotated
+			fx.Annotate(
+				NewServeMux,
+				fx.ParamTags(`name:"echo"`, `name:"hello"`),
+			),
 			// handler should be provided as a Route
 			fx.Annotate(
 				NewEchoHandler,
 				fx.As(new(Route)),
+				// Fx does not allow two instances of the same type to be present in the container without annotating them
+				fx.ResultTags(`name:"echo"`),
+			),
+			fx.Annotate(
+				NewHelloHandler,
+				fx.As(new(Route)),
+				// Fx does not allow two instances of the same type to be present in the container without annotating them
+				fx.ResultTags(`name:"hello"`),
 			),
 			zap.NewExample, // zap.NewProduction <- for real applications
 		),
@@ -96,5 +112,35 @@ func (*EchoHandler) Pattern() string {
 func (h *EchoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, r.Body); err != nil {
 		h.log.Warn("Failed to handle request", zap.Error(err))
+	}
+}
+
+// HelloHandler is an HTTP handler that
+// prints a greeting to the user.
+type HelloHandler struct {
+	log *zap.Logger
+}
+
+// NewHelloHandler builds a new HelloHandler.
+func NewHelloHandler(log *zap.Logger) *HelloHandler {
+	return &HelloHandler{log: log}
+}
+
+func (*HelloHandler) Pattern() string {
+	return "/hello"
+}
+
+func (h *HelloHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.log.Error("Failed to read request", zap.Error(err))
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := fmt.Fprintf(w, "Hello, %s\n", body); err != nil {
+		h.log.Error("Failed to write response", zap.Error(err))
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 }
