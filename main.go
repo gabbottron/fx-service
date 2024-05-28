@@ -34,5 +34,12 @@ func main() {
 		// This provides the HTTP Server to the container
 		// so that we may use it
 		fx.Provide(NewHTTPServer),
+		// Used for root level invocations like background
+		// workers or global loggers. Without this invoke,
+		// the lifecycle methods for the HTTP server we set
+		// up will not fire with the container. Ensures
+		// HTTP server is always instantiated, even if it
+		// is not directly referenced in code yet.
+		fx.Invoke(func(*http.Server) {}),
 	).Run()
 }
