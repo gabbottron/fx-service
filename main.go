@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+
+	_ "github.com/lib/pq" // PostgreSQL driver
 
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
@@ -51,6 +54,29 @@ func NewServeMux(routes []Route) *http.ServeMux {
 	return mux
 }
 
+// Function to initialize the PostgreSQL connection
+func NewPostgresConnection(lc fx.Lifecycle, log *zap.Logger) (*sql.DB, error) {
+	connStr := "user=username dbname=mydb sslmode=disable" // Replace with your actual connection string
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Register lifecycle hooks to close the connection properly
+	lc.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			log.Info("Connecting to PostgreSQL")
+			return db.Ping()
+		},
+		OnStop: func(context.Context) error {
+			log.Info("Closing PostgreSQL connection")
+			return db.Close()
+		},
+	})
+
+	return db, nil
+}
+
 // AsRoute annotates the given constructor to state that
 // it provides a route to the "routes" group.
 func AsRoute(f any) any {
@@ -80,7 +106,8 @@ func main() {
 			// this feeds their routes into this group
 			AsRoute(NewEchoHandler),
 			AsRoute(NewHelloHandler),
-			zap.NewExample, // zap.NewProduction <- for real applications
+			NewPostgresConnection, // Provide the PostgreSQL connection
+			zap.NewExample,        // zap.NewProduction <- for real applications
 		),
 		// Used for root level invocations like background
 		// workers or global loggers. Without this invoke,
@@ -96,11 +123,12 @@ func main() {
 // back to the response.
 type EchoHandler struct {
 	log *zap.Logger
+	db  *sql.DB
 }
 
 // NewEchoHandler builds a new EchoHandler.
-func NewEchoHandler(log *zap.Logger) *EchoHandler {
-	return &EchoHandler{log: log}
+func NewEchoHandler(log *zap.Logger, db *sql.DB) *EchoHandler {
+	return &EchoHandler{log: log, db: db}
 }
 
 // EchoHandler implements the Route interface
@@ -119,11 +147,12 @@ func (h *EchoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // prints a greeting to the user.
 type HelloHandler struct {
 	log *zap.Logger
+	db  *sql.DB
 }
 
 // NewHelloHandler builds a new HelloHandler.
-func NewHelloHandler(log *zap.Logger) *HelloHandler {
-	return &HelloHandler{log: log}
+func NewHelloHandler(log *zap.Logger, db *sql.DB) *HelloHandler {
+	return &HelloHandler{log: log, db: db}
 }
 
 func (*HelloHandler) Pattern() string {

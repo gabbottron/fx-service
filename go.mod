@@ -3,6 +3,7 @@ module github.com/gabbottron/fx-service
 go 1.22.1
 
 require (
+	github.com/lib/pq v1.10.9 // indirect
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/fx v1.21.1 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
