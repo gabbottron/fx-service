@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
 
@@ -14,6 +16,21 @@ import (
 	"go.uber.org/fx/fxevent"
 	"go.uber.org/zap"
 )
+
+var (
+	fPort = flag.String("port", os.Getenv("PORT"), "the port the service will listen on")
+
+	fDBName     = flag.String("dbname", os.Getenv("DB_NAME"), "the name of the database to connect to")
+	fDBHost     = flag.String("dbhost", os.Getenv("DB_HOSTNAME"), "the hostname of the database to connect to")
+	fDBPort     = flag.String("dbport", os.Getenv("DB_PORT"), "the port of the database to connect to")
+	fDBUsername = flag.String("dbusername", os.Getenv("DB_USERNAME"), "the user for the database")
+	fDBPassword = flag.String("dbpassword", os.Getenv("DB_PASSWORD"), "the password for the database")
+)
+
+// Config holds the configuration parameters
+type Config struct {
+	PostgresConnString string
+}
 
 // Route is an http.Handler that knows the mux pattern
 // under which it will be registered.
@@ -26,7 +43,7 @@ type Route interface {
 
 // Function to build the HTTP server
 func NewHTTPServer(lc fx.Lifecycle, mux *http.ServeMux, log *zap.Logger) *http.Server {
-	srv := &http.Server{Addr: ":8080", Handler: mux}
+	srv := &http.Server{Addr: ":" + *fPort, Handler: mux}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			ln, err := net.Listen("tcp", srv.Addr)
@@ -55,9 +72,8 @@ func NewServeMux(routes []Route) *http.ServeMux {
 }
 
 // Function to initialize the PostgreSQL connection
-func NewPostgresConnection(lc fx.Lifecycle, log *zap.Logger) (*sql.DB, error) {
-	connStr := "user=username dbname=mydb sslmode=disable" // Replace with your actual connection string
-	db, err := sql.Open("postgres", connStr)
+func NewPostgresConnection(lc fx.Lifecycle, log *zap.Logger, config Config) (*sql.DB, error) {
+	db, err := sql.Open("postgres", config.PostgresConnString)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +93,13 @@ func NewPostgresConnection(lc fx.Lifecycle, log *zap.Logger) (*sql.DB, error) {
 	return db, nil
 }
 
+// ProvideConfig provides the configuration for the application
+func ProvideConfig() Config {
+	return Config{
+		PostgresConnString: fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%s sslmode=disable", *fDBUsername, *fDBPassword, *fDBName, *fDBHost, *fDBPort),
+	}
+}
+
 // AsRoute annotates the given constructor to state that
 // it provides a route to the "routes" group.
 func AsRoute(f any) any {
@@ -88,6 +111,9 @@ func AsRoute(f any) any {
 }
 
 func main() {
+	// parse command line flags and environment variables
+	flag.Parse()
+
 	fx.New(
 		// Use zap logger for FXs logs as well
 		fx.WithLogger(func(log *zap.Logger) fxevent.Logger {
@@ -107,7 +133,8 @@ func main() {
 			AsRoute(NewEchoHandler),
 			AsRoute(NewHelloHandler),
 			NewPostgresConnection, // Provide the PostgreSQL connection
-			zap.NewExample,        // zap.NewProduction <- for real applications
+			ProvideConfig,
+			zap.NewExample, // zap.NewProduction <- for real applications
 		),
 		// Used for root level invocations like background
 		// workers or global loggers. Without this invoke,
